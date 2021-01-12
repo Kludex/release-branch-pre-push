@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+import functools
+import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import List
+
+import yaml
+from pydantic import BaseModel, Field, ValidationError
+
+logging.basicConfig(format="%(levelname)s: %(message)s")
+
+_check_output = functools.partial(subprocess.check_output, shell=True, encoding="utf8")
+
+debug_mode = os.getenv("RELEASE_BRANCH_DEBUG_MODE", False)
+
+
+class Configuration(BaseModel):
+    release_branches: List[str] = Field(..., alias="release-branches")
+    main_branch: str = Field(..., alias="main-branch")
+
+
+def main():
+    root_folder = Path(_check_output("git rev-parse --show-toplevel").rstrip("\r\n"))
+    with open(root_folder / "release-branch.yaml") as f:
+        data = yaml.load(f, Loader=yaml.FullLoader)
+        try:
+            config = Configuration(**data)
+            logging.getLogger().setLevel("DEBUG" if debug_mode else "INFO")
+            logging.debug(f"Configuration: {config}")
+        except ValidationError:
+            sys.exit("Wrong parameters on the release-branch.yaml.")
+    logging.debug(f"Root folder: {root_folder}")
+    logging.debug(f"Arguments: {sys.argv}")
+    current_branch = _check_output("git branch --show-current").rstrip("\r\n")
+    logging.debug(f"Current branch: {current_branch}")
+    if current_branch in config.release_branches:
+        logging.info(
+            "\033[1;32mYou're in a release branch, do you want to merge ",
+            "this into your main branch?\033[39m",
+        )
+    if current_branch == config.main_branch:
+        logging.info(
+            "\033[1;32mYou're in the main branch, are you sure you don't want this",
+            " into a release branch?\033[39m",
+        )
+
+
+if __name__ == "__main__":
+    main()
